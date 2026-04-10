@@ -1,38 +1,59 @@
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "no-store, max-age=0");
-  res.setHeader("Pragma", "no-cache");
-  res.setHeader("Expires", "0");
-
   try {
-    const nowIso = new Date().toISOString();
-
-    const planned = await fetch(process.env.BASE44_EXPORT_URL, {
-      method: "POST",
+    // 🔹 Queue aus Base44 holen
+    const queueRes = await fetch(process.env.BASE44_QUEUE_URL, {
       headers: {
-        "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.BASE44_API_KEY}`,
       },
-      body: JSON.stringify({ now: nowIso, limit: 25 }),
-    }).then(r => r.json());
+    });
 
-    const plans = Array.isArray(planned?.plans) ? planned.plans : [];
-    let queuedCreated = 0;
+    const data = await queueRes.json();
+    const queue = data?.items || [];
 
-    for (const p of plans) {
-      const createRes = await fetch(process.env.BASE44_CREATE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.BASE44_API_KEY}`,
-        },
-        body: JSON.stringify({ plan_id: p.id, now: nowIso }),
-      }).then(r => r.json());
+    let sent = 0;
 
-      queuedCreated += createRes?.created || 0;
+    for (const mail of queue) {
+      try {
+        // 🔹 Mail senden
+        await resend.emails.send({
+          from: "onboarding@resend.dev",
+          to: mail.empfaenger_email,
+          subject: mail.betreff,
+          html: mail.inhalt,
+        });
+
+        // 🔹 Status zurückmelden
+        await fetch(process.env.BASE44_MARK_SENT_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.BASE44_API_KEY}`,
+          },
+          body: JSON.stringify({
+            id: mail.id,
+            status: "gesendet",
+          }),
+        });
+
+        sent++;
+      } catch (err) {
+        console.error("Fehler bei Mail:", err);
+      }
     }
 
-    return res.status(200).json({ ok: true, created: queuedCreated });
-  } catch (e) {
-    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+    return res.status(200).json({
+      ok: true,
+      processed: queue.length,
+      sent,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error.message,
+    });
   }
 }
