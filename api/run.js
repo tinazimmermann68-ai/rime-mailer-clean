@@ -1,18 +1,24 @@
-import { Resend } from "resend";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
-
 export default async function handler(req, res) {
   try {
-    // TEST: erstmal nur prüfen ob Funktion läuft
-    return res.status(200).json({
-      ok: true,
-      message: "API läuft – nächster Schritt: Queue anbinden"
-    });
+    const response = await fetch(
+      "https://ri-me-seminar-hub-316f32aa.base44.app/functions/consumeScheduledEmails",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Worker-Key": process.env.WORKER_KEY,
+        },
+        body: JSON.stringify({}),
+      }
+    );
+
+    const data = await response.json();
+
+    return res.status(response.ok ? 200 : response.status).json(data);
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      error: error.message
+      error: error.message || String(error),
     });
   }
 }
